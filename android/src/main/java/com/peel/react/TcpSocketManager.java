@@ -4,7 +4,16 @@ import android.support.annotation.Nullable;
 import android.util.SparseArray;
 
 import com.facebook.react.bridge.Callback;
-import com.koushikdutta.async.*;
+import com.facebook.react.bridge.ReadableMap;
+import com.koushikdutta.async.AsyncNetworkSocket;
+import com.koushikdutta.async.AsyncSSLSocket;
+import com.koushikdutta.async.AsyncSSLSocketWrapper;
+import com.koushikdutta.async.AsyncServer;
+import com.koushikdutta.async.AsyncServerSocket;
+import com.koushikdutta.async.AsyncSocket;
+import com.koushikdutta.async.ByteBufferList;
+import com.koushikdutta.async.DataEmitter;
+import com.koushikdutta.async.Util;
 import com.koushikdutta.async.callback.CompletedCallback;
 import com.koushikdutta.async.callback.ConnectCallback;
 import com.koushikdutta.async.callback.DataCallback;
@@ -15,6 +24,15 @@ import java.lang.ref.WeakReference;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * Created by aprock on 12/29/15.
@@ -114,7 +132,7 @@ public final class TcpSocketManager {
         });
     }
 
-    public void connect(final Integer cId, final @Nullable String host, final Integer port, final boolean useTls) throws UnknownHostException, IOException {
+    public void connect(final Integer cId, final @Nullable String host, final Integer port, final boolean useTls, final ReadableMap options) throws UnknownHostException, IOException {
         // resolve the address
         final InetSocketAddress socketAddress;
         if (host != null) {
@@ -127,12 +145,42 @@ public final class TcpSocketManager {
             @Override
             public void onConnectCompleted(Exception ex, AsyncSocket socket) {
                 if (useTls) {
+                    Boolean rejectUnauthorized = true;
+                    if(options.hasKey("rejectUnauthorized"))
+                            rejectUnauthorized = options.getBoolean("rejectUnauthorized");
+                    SSLContext sslContext = AsyncSSLSocketWrapper.getDefaultSSLContext();
+                    TrustManager[] trustManagers = null;
+                    HostnameVerifier hostnameVerifier = null;
+                    if(!rejectUnauthorized)
+                        try {
+                            sslContext = SSLContext.getInstance("TLS");
+                            trustManagers = new TrustManager[] {
+                                    new X509TrustManager() {
+                                        public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+                                        public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+                                        public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[]{}; }
+                                    }
+                            };
+                            hostnameVerifier = new HostnameVerifier() {
+                                @Override
+                                public boolean verify(String s, SSLSession sslSession) {
+                                    return true;
+                                }
+                            };
+                            try {
+                                sslContext.init(null, trustManagers, null);
+                            } catch (KeyManagementException e) {
+                                e.printStackTrace();
+                            }
+                        } catch (NoSuchAlgorithmException e) {
+                            e.printStackTrace();
+                        }
                     AsyncSSLSocketWrapper.handshake(socket,
                             socketAddress.getHostName(),
                             socketAddress.getPort(),
-                            AsyncSSLSocketWrapper.getDefaultSSLContext().createSSLEngine(),
-                            null,
-                            null,
+                            sslContext.createSSLEngine(),
+                            trustManagers,
+                            hostnameVerifier,
                             true,
                             new AsyncSSLSocketWrapper.HandshakeCallback() {
                                 @Override
@@ -228,4 +276,3 @@ public final class TcpSocketManager {
         mClients.clear();
     }
 }
-

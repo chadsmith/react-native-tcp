@@ -20,6 +20,7 @@ NSString *const RCTTCPErrorDomain = @"RCTTCPErrorDomain";
     RCTResponseSenderBlock _pendingUpgrade;
     NSLock *_lock;
     long _sendTag;
+    BOOL _rejectUnauthorized;
 }
 
 - (id)initWithClientId:(NSNumber *)clientID andConfig:(id<SocketClientDelegate>)aDelegate;
@@ -49,6 +50,7 @@ NSString *const RCTTCPErrorDomain = @"RCTTCPErrorDomain";
         _lock = [[NSLock alloc] init];
         _tcpSocket = tcpSocket;
         [_tcpSocket setUserData: clientID];
+        _rejectUnauthorized = YES;
     }
 
     return self;
@@ -61,6 +63,9 @@ NSString *const RCTTCPErrorDomain = @"RCTTCPErrorDomain";
 
 - (BOOL)connect:(NSString *)host port:(int)port withOptions:(NSDictionary *)options useSsl:(BOOL)useSsl error:(NSError **)error
 {
+    if(options && options[@"rejectUnauthorized"] != nil)
+        _rejectUnauthorized = [options[@"rejectUnauthorized"] boolValue];
+
     self.useSsl = useSsl;
     if (_tcpSocket) {
         if (error) {
@@ -241,6 +246,11 @@ NSString *const RCTTCPErrorDomain = @"RCTTCPErrorDomain";
     [newSocket readDataWithTimeout:-1 tag:inComing.id.longValue];
 }
 
+- (void)socket:(GCDAsyncSocket *)sock didReceiveTrust:(SecTrustRef)trust completionHandler:(void (^)(BOOL shouldTrustPeer))completionHandler {
+    if (completionHandler)
+        completionHandler(YES);
+}
+
 - (void)socket:(GCDAsyncSocket *)sock didConnectToHost:(NSString *)host port:(uint16_t)port
 {
     if (!_clientDelegate) {
@@ -251,6 +261,11 @@ NSString *const RCTTCPErrorDomain = @"RCTTCPErrorDomain";
     if (self.useSsl)
     {
         NSMutableDictionary *settings = [NSMutableDictionary dictionary];
+
+        if(!_rejectUnauthorized)
+            [settings setObject:[NSNumber numberWithBool:YES]
+                         forKey:GCDAsyncSocketManuallyEvaluateTrust];
+
         [sock startTLS:settings];
 
         [_clientDelegate onConnect:self];
